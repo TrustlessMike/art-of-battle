@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+
+# public/models/*.glb are deliberately NOT ignored. They are build products of
+# the Blender scripts, but regenerating them needs Blender 5.x on the machine,
+# and the game cannot run without them. Committing the ~2MB of compressed .glb
+# keeps the repo clone-and-play; `npm run assets` rebuilds them from source.
