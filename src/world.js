@@ -115,6 +115,61 @@ export function buildEnvironment(renderer) {
   return target.texture;
 }
 
+/**
+ * The cone of lit air above a brazier.
+ *
+ * Real volumetrics would mean marching the depth buffer; at this scale a piece
+ * of additive geometry reads the same and costs one draw call. Two things stop
+ * it looking like a solid cone: it fades out towards the tip, and it fades as
+ * the surface turns edge-on to the camera, so there is never a hard silhouette
+ * where the geometry ends.
+ */
+const SHAFT_VERT = `
+varying vec2 vUvS;
+varying vec3 vNrmS;
+varying vec3 vViewS;
+void main() {
+  vUvS = uv;
+  vNrmS = normalize(normalMatrix * normal);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vViewS = -mv.xyz;
+  gl_Position = projectionMatrix * mv;
+}`;
+
+const SHAFT_FRAG = `
+uniform vec3 uColor;
+uniform float uIntensity;
+varying vec2 vUvS;
+varying vec3 vNrmS;
+varying vec3 vViewS;
+void main() {
+  // uv.y runs 0 at the base to 1 at the tip on a cone.
+  float height = 1.0 - vUvS.y;
+  float fade = pow(height, 2.2);
+  // Edge-on faces are where the eye would notice the geometry, so hide them.
+  float facing = 1.0 - abs(dot(normalize(vNrmS), normalize(vViewS)));
+  fade *= smoothstep(1.0, 0.35, facing);
+  gl_FragColor = vec4(uColor * uIntensity * fade, fade);
+}`;
+
+function buildShaft(color) {
+  const geo = new THREE.ConeGeometry(1.15, 3.1, 14, 1, true);
+  geo.translate(0, 1.55, 0);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uIntensity: { value: 0.5 },
+    },
+    vertexShader: SHAFT_VERT,
+    fragmentShader: SHAFT_FRAG,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
 export class Brazier {
   constructor(position) {
     this.position = position.clone();
@@ -142,6 +197,11 @@ export class Brazier {
       blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
     }));
     this.group.add(this.flame);
+
+    this.shaft = buildShaft(0xff8f42);
+    this.shaft.position.y = 0.3;
+    this.group.add(this.shaft);
+
     this.phase = Math.random() * 20;
   }
 
@@ -162,6 +222,10 @@ export class Brazier {
       Math.sin(t * 27.3 + this.phase * 2) * 0.08;
     this.light.intensity = 34 * flicker;
     this.flame.material.opacity = 0.7 + flicker * 0.22;
+    // The shaft breathes with the flame, but at a fraction of its swing — lit
+    // air lags the fire that lights it.
+    this.shaft.material.uniforms.uIntensity.value = 0.34 + flicker * 0.20;
+    this.shaft.rotation.y = t * 0.15 + this.phase;
   }
 }
 
@@ -290,5 +354,29 @@ export function buildWorld(renderer, arenaScene) {
   const motes = new Motes();
   scene.add(motes.points);
 
-  return { scene, moon, braziers, hemi, motes };
+  // Firelight shadows, but only two of them.
+  //
+  // Eleven shadow-casting point lights would mean eleven cube shadow maps
+  // rendered every frame. Instead two dedicated casters follow whichever
+  // braziers are nearest the player and take over their lighting entirely, so
+  // the fire nearest you throws real moving shadows and the rest stay cheap.
+  // One caster, not two. Each shadow-casting point light renders six cube
+  // faces of the scene, and measured here that is roughly +375 draw calls
+  // apiece — enough to undo the batching this build exists to gain. One is
+  // affordable at the top quality tier; two were not.
+  const fireShadows = [];
+  for (let i = 0; i < 1; i++) {
+    const l = new THREE.PointLight(0xff8a3a, 0, 24, 2);
+    l.castShadow = true;
+    l.shadow.mapSize.set(512, 512);
+    l.shadow.bias = -0.004;
+    l.shadow.normalBias = 0.04;
+    l.shadow.camera.near = 0.25;
+    l.shadow.camera.far = 18;
+    l.visible = false;
+    scene.add(l);
+    fireShadows.push(l);
+  }
+
+  return { scene, moon, braziers, hemi, motes, fireShadows };
 }

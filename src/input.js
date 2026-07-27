@@ -47,8 +47,8 @@ export class Input {
     this.pressed = {
       light: false, heavy: false, feint: false, gb: false, dodge: false,
       restart: false, pause: false, toggleLock: false, cycleQuality: false,
+      toggleHints: false,
       difficulty: null, gadgetSlot: null,
-      cycleWeapon: 0,
     };
     this.heavyHeld = false;
     this.heavyReleased = false;
@@ -129,6 +129,7 @@ export class Input {
         case 'KeyP': this.pressed.pause = true; break;
         case 'KeyQ': this.pressed.toggleLock = true; break;
         case 'KeyG': this.pressed.cycleQuality = true; break;
+        case 'KeyH': this.pressed.toggleHints = true; break;
         // Keyboard guard, for players who would rather not use the mouse.
         case 'ArrowUp': this._setStick(0, 1); break;
         case 'ArrowLeft': this._setStick(-1, 0); break;
@@ -140,10 +141,6 @@ export class Input {
         case 'Digit2': this.pressed.difficulty = 'warrior'; this.pressed.gadgetSlot = 1; break;
         case 'Digit3': this.pressed.difficulty = 'warlord'; this.pressed.gadgetSlot = 2; break;
         case 'Digit4': this.pressed.gadgetSlot = 3; break;
-        case 'Tab':
-          this.pressed.cycleWeapon = e.shiftKey ? -1 : 1;
-          e.preventDefault();
-          break;
       }
     });
     window.addEventListener('keyup', (e) => {
@@ -208,7 +205,6 @@ export class Input {
       guardChanged: this.guardChanged };
     for (const k in this.pressed) {
       if (k === 'difficulty' || k === 'gadgetSlot') this.pressed[k] = null;
-      else if (k === 'cycleWeapon') this.pressed[k] = 0;
       else this.pressed[k] = false;
     }
     p.keys = this.justPressed;

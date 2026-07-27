@@ -39,10 +39,14 @@ import bmesh
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rigkit import (  # noqa: E402  (path juggling has to come first)
-    box, cylinder, dome, material, rot, sheet,
+    box, cylinder, dome, material, rot, sheet, _shade_smooth,
 )
 
 SEED = 20260724
+
+# Edge treatment for the compound, matching rigkit's character/weapon bake.
+BEVEL = 0.006
+SMOOTH_ANGLE = 38.0
 
 # ---------------------------------------------------------------- tunables
 
@@ -176,11 +180,25 @@ class Group:
         bm = bmesh.new()
         bm.from_mesh(me)
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        # The characters and weapons have always come off rigkit's bevel pass;
+        # the compound never did, so every wall, step and beam met the light on
+        # a perfectly sharp 90 degrees and read as untextured geometry. A single
+        # segment at 6mm is the same treatment the fighters get: too small to
+        # see as a chamfer, wide enough to catch a highlight along every edge.
+        if BEVEL:
+            bmesh.ops.bevel(
+                bm, geom=list(bm.verts) + list(bm.edges),
+                offset=BEVEL, segments=1, profile=0.5, affect='EDGES',
+                clamp_overlap=True, loop_slide=True,
+            )
         bm.to_mesh(me)
         bm.free()
         me.update()
         ob = bpy.data.objects.new(self.name, me)
         bpy.context.scene.collection.objects.link(ob)
+        # Smooth only across the bevel itself; the 38 degree threshold leaves
+        # every real corner hard.
+        _shade_smooth(ob, SMOOTH_ANGLE)
         return ob
 
 

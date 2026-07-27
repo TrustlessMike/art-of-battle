@@ -128,6 +128,8 @@ class Game {
     const world = buildWorld(renderer, assets.compound?.scene ?? null);
     this.scene = world.scene;
     this.braziers = world.braziers;
+    this.fireShadows = world.fireShadows || [];
+    this._fireShadowOptIn = new URLSearchParams(location.search).has('fireshadow');
     this.motes = world.motes;
     this.moon = world.moon;
 
@@ -673,6 +675,7 @@ class Game {
         case 'phase':
           if (e.phase === PHASE.ACTION) {
             this.hud.say('FIGHT', '#e8eef8', 1.2, true);
+            this.hud.showHints();
             A.play('victory', { volume: 0.5, rate: 0.7 });
           }
           break;
@@ -727,6 +730,7 @@ class Game {
     const inp = this.input.flush();
     this.time += dtRaw;
     for (const b of this.braziers) b.update(this.time);
+    this._followFireShadows();
     this.motes?.update(dtRaw, this.player.pos, this.time);
     if (this.mode === 'create') {
       this._updateCreate(dtRaw, inp);
@@ -741,6 +745,10 @@ class Game {
     }
     // Graphics quality is a player-facing setting: the composer costs real
     // frames on integrated graphics, so it has to be droppable in-game.
+    if (inp.toggleHints) {
+      const on = this.hud.toggleHints();
+      this.hud.say(on ? 'CONTROLS PINNED' : 'CONTROLS HIDDEN', '#c9d2de', 0.9);
+    }
     if (inp.cycleQuality && this.post) {
       const order = ['high', 'medium', 'off'];
       const next = order[(order.indexOf(this.post.quality) + 1) % order.length];
@@ -929,6 +937,47 @@ class Game {
     }
   }
 
+  /**
+   * Hand the two shadow-casting lights to the nearest braziers.
+   *
+   * The follower takes the brazier's intensity and the brazier's own light is
+   * muted while it does, so the fire is lit once, not twice. Everything beyond
+   * the nearest two keeps its cheap shadowless point light.
+   */
+  _followFireShadows() {
+    if (!this.fireShadows.length) return;
+    // Measured cost of a single shadow-casting brazier in this scene: 391 draw
+    // calls, against 355 for everything else put together. A cube shadow map
+    // renders the scene six times, and the compound is wide enough that little
+    // is culled. The effect is real but slight — firelight here is warm fill
+    // rather than a key — so it does not earn a doubled frame, and stays off
+    // unless explicitly asked for with ?fireshadow.
+    if (!this._fireShadowOptIn) {
+      for (const l of this.fireShadows) l.visible = false;
+      for (const bz of this.braziers) bz.light.visible = true;
+      return;
+    }
+    const eye = this.camera.position;
+    // Cheap partial selection: the list is short and this runs once a frame.
+    let a = null, b = null, da = Infinity, db = Infinity;
+    for (const bz of this.braziers) {
+      const d = bz.position.distanceToSquared(eye);
+      if (d < da) { b = a; db = da; a = bz; da = d; }
+      else if (d < db) { b = bz; db = d; }
+    }
+    const chosen = [a, b];
+    for (const bz of this.braziers) bz.light.visible = true;
+    this.fireShadows.forEach((l, i) => {
+      const bz = chosen[i];
+      if (!bz || da > 400) { l.visible = false; return; }
+      l.visible = true;
+      l.position.copy(bz.position).setY(bz.position.y + 0.35);
+      l.intensity = bz.light.intensity;
+      l.distance = bz.light.distance;
+      bz.light.visible = false;        // the follower is lighting it now
+    });
+  }
+
   _updateCamera(dt) {
     if (this.siege.phase === PHASE.PREP) {
       const sc = this._scout;
@@ -962,10 +1011,13 @@ async function boot() {
   const boot0 = viewportSize();
   renderer.setSize(boot0.w, boot0.h);
   renderer.shadowMap.enabled = true;
-  // three removed PCFSoftShadowMap in r185 — asking for it logged a warning and
-  // silently fell back to hard PCF every frame, so the scene has been rendering
-  // with harder shadow edges than intended. Softness now comes from the light's
-  // own shadow.radius (see world.js), which is the supported route.
+  // PCFSoftShadowMap is deprecated, not gone: three still defines it, but
+  // WebGLShadowMap.render reassigns this.type to PCFShadowMap on first use and
+  // warns once. Asking for it therefore bought nothing — the scene was already
+  // drawing hard PCF edges. Requesting PCF explicitly and taking the softness
+  // from the light's own shadow.radius (see world.js) is the supported route;
+  // radius feeds the 5-tap Vogel disk in the PCF branch of
+  // shadowmap_pars_fragment, so it genuinely widens the penumbra.
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;

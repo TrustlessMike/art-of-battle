@@ -30,23 +30,30 @@ function hash2(x, y) {
   return s - Math.floor(s);
 }
 
-/** Value noise on a wrapping lattice, so every map tiles seamlessly. */
-function valueNoise(x, y, period) {
+/**
+ * Value noise on a wrapping lattice, so every map tiles seamlessly.
+ *
+ * The two axes take separate periods on purpose. Several of these patterns are
+ * directional — fur streaks, wood grain — and stretch one axis against the
+ * other. With a single shared period the stretched axis wraps somewhere other
+ * than the texture edge, which puts a visible seam across every surface using
+ * it. The period on each axis must match that axis's own frequency.
+ */
+function valueNoise(x, y, px, py) {
   const xi = Math.floor(x), yi = Math.floor(y);
   const xf = x - xi, yf = y - yi;
   const u = xf * xf * (3 - 2 * xf);
   const v = yf * yf * (3 - 2 * yf);
-  const w = (i, j) => hash2(((i % period) + period) % period,
-    ((j % period) + period) % period);
+  const w = (i, j) => hash2(((i % px) + px) % px, ((j % py) + py) % py);
   const a = w(xi, yi), b = w(xi + 1, yi);
   const c = w(xi, yi + 1), d = w(xi + 1, yi + 1);
   return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
 }
 
-function fbm(x, y, period, octaves) {
+function fbm(x, y, px, py, octaves) {
   let sum = 0, amp = 0.5, f = 1;
   for (let o = 0; o < octaves; o++) {
-    sum += valueNoise(x * f, y * f, period * f) * amp;
+    sum += valueNoise(x * f, y * f, px * f, py * f) * amp;
     amp *= 0.5;
     f *= 2;
   }
@@ -84,7 +91,7 @@ const PATTERNS = {
   steel: (x, y) => {
     const dents = 1 - worley(x, y, 5) * 0.5;
     const mill = Math.sin(y * Math.PI * 64) * 0.02;
-    return { h: dents * 0.55 + fbm(x * 8, y * 8, 8, 3) * 0.25 + mill, r: (dents - 0.6) * 0.22 };
+    return { h: dents * 0.55 + fbm(x * 8, y * 8, 8, 8, 3) * 0.25 + mill, r: (dents - 0.6) * 0.22 };
   },
 
   // Riveted mail: a dense staggered grid of rings.
@@ -103,7 +110,7 @@ const PATTERNS = {
 
   // Cast and polished: gentle undulation, very little breakup.
   gold: (x, y) => {
-    const s = fbm(x * 5, y * 5, 5, 3);
+    const s = fbm(x * 5, y * 5, 5, 5, 3);
     return { h: s, r: (s - 0.5) * 0.16 };
   },
 
@@ -111,13 +118,13 @@ const PATTERNS = {
   leather: (x, y) => {
     const c = worley(x, y, 14);
     const crack = Math.max(0, 1 - c * 2.2);
-    const grain = fbm(x * 26, y * 26, 26, 3) * 0.3;
+    const grain = fbm(x * 26, y * 26, 26, 26, 3) * 0.3;
     return { h: (1 - crack) * 0.7 + grain, r: crack * 0.34 };
   },
 
   // Fur: directional clumped streaks.
   fur: (x, y) => {
-    const streak = fbm(x * 34, y * 5, 34, 3);
+    const streak = fbm(x * 34, y * 5, 34, 5, 3);
     return { h: streak, r: (streak - 0.5) * 0.4 };
   },
 
@@ -127,26 +134,26 @@ const PATTERNS = {
     const warp = Math.sin(x * Math.PI * n);
     const weft = Math.sin(y * Math.PI * n);
     const weave = (warp > 0 ? warp : 0) * 0.5 + (weft > 0 ? weft : 0) * 0.5;
-    return { h: weave * 0.7 + fbm(x * 12, y * 12, 12, 2) * 0.3, r: (0.5 - weave) * 0.26 };
+    return { h: weave * 0.7 + fbm(x * 12, y * 12, 12, 12, 2) * 0.3, r: (0.5 - weave) * 0.26 };
   },
 
   // Quarried stone: coarse fractal pitting.
   stone: (x, y) => {
-    const base = fbm(x * 6, y * 6, 6, 5);
+    const base = fbm(x * 6, y * 6, 6, 6, 5);
     const pits = Math.max(0, 1 - worley(x, y, 9) * 1.6) * 0.4;
     return { h: base - pits, r: (base - 0.5) * 0.3 + pits * 0.2 };
   },
 
   // Sawn timber: long grain with occasional harder lines.
   wood: (x, y) => {
-    const rings = Math.sin((y * 7 + fbm(x * 3, y * 12, 3, 3) * 2.4) * Math.PI * 2);
-    const grain = fbm(x * 4, y * 40, 4, 3);
+    const rings = Math.sin((y * 7 + fbm(x * 3, y * 12, 3, 12, 3) * 2.4) * Math.PI * 2);
+    const grain = fbm(x * 4, y * 40, 4, 40, 3);
     return { h: rings * 0.28 + grain * 0.6, r: rings * 0.14 };
   },
 
   // Skin and bone: barely there, just enough to kill the plastic sheen.
   skin: (x, y) => {
-    const s = fbm(x * 30, y * 30, 30, 3);
+    const s = fbm(x * 30, y * 30, 30, 30, 3);
     return { h: s, r: (s - 0.5) * 0.18 };
   },
 };
@@ -226,7 +233,7 @@ const FAMILY = {
 const RULES = [
   [/mail|chain/i, 'mail'],
   [/gold|brass|bronze/i, 'gold'],
-  [/steel|iron|blade|jigane|dark$/i, 'steel'],
+  [/steel|iron|blade|jigane/i, 'steel'],
   [/leather|hide|strap|wrap|sack|rayskin/i, 'leather'],
   [/fur|hair/i, 'fur'],
   [/cloth|accent|lining|azure|crimson|cloak|tabard|straw/i, 'cloth'],
@@ -236,6 +243,12 @@ const RULES = [
   // Padding and quilted black goods under the plate — dark, matte, leathery.
   [/black|gambeson|padding/i, 'leather'],
   [/charcoal|coal|ember/i, 'stone'],
+  // `*dark` last, and deliberately so. Several materials say only what shade
+  // they are — raider_dark, warden_dark — and steel is the right guess for
+  // those. But it must not outrank the rules that say what a surface actually
+  // *is*: with this higher up, wood_dark and M_TimberDark rendered as planished
+  // steel, and raider_furdark lost its fur.
+  [/dark$/i, 'steel'],
 ];
 
 /**
@@ -292,15 +305,43 @@ function enhance(material, family) {
     shader.uniforms.uNormalAmp = { value: cfg.normal };
     shader.uniforms.uRoughAmp = { value: cfg.rough };
 
-    shader.vertexShader = `varying vec3 vDetailPos;\nvarying vec3 vDetailNrm;\n${
-      shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n\tvDetailPos = position;\n\tvDetailNrm = normal;',
-      )}`;
+    // `position` is NOT in metres. The .glb files are meshopt-compressed, which
+    // brings KHR_mesh_quantization: POSITION is normalized Int16, so the
+    // attribute spans [-1,1] whatever the mesh's real size, and the metres live
+    // on the node's scale. Reading it raw made uDetailScale mean "tiles across
+    // this mesh's bounding box" instead of "tiles per metre" — on one knight
+    // that is 44 tiles/m on a foot next to 7.4 on a cloak. Multiplying by the
+    // model matrix's column lengths recovers object-space metres, and is a
+    // no-op for meshes that were never quantized.
+    // The tangent frame is built HERE, in object space, and rotated into view
+    // space on the way out. It cannot be built in the fragment shader: by that
+    // point `normal` is already view space, so a frame derived from it is
+    // pinned to the screen and swims as the camera orbits — while the pattern
+    // it perturbs is keyed to object space. And it cannot be *converted* in the
+    // fragment shader either, because `normalMatrix` is a vertex-stage uniform
+    // in three and is simply not declared in the fragment stage.
+    shader.vertexShader =
+      `varying vec3 vDetailPos;\nvarying vec3 vDetailNrm;\nvarying vec3 vDetailT;\nvarying vec3 vDetailB;\n${
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+\tvec3 dqScale = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
+\tvDetailPos = position * dqScale;
+\tvDetailNrm = normal;
+\t{
+\t\tvec3 No_ = normalize(normal);
+\t\tvec3 up_ = abs(No_.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+\t\tvec3 To_ = normalize(cross(up_, No_));
+\t\tvDetailT = normalMatrix * To_;
+\t\tvDetailB = normalMatrix * cross(No_, To_);
+\t}`,
+        )}`;
 
     const header = `
       varying vec3 vDetailPos;
       varying vec3 vDetailNrm;
+      varying vec3 vDetailT;
+      varying vec3 vDetailB;
       uniform sampler2D uDetail;
       uniform float uDetailScale;
       uniform float uNormalAmp;
@@ -334,14 +375,14 @@ function enhance(material, family) {
         '#include <normal_fragment_maps>',
         `#include <normal_fragment_maps>
         {
+          // vDetailT / vDetailB are the object-space tangent frame already
+          // rotated into view space by the vertex stage, so they line up with
+          // \`normal\` (view space) and stay welded to the surface as the camera
+          // moves. These models carry no tangent attribute to derive a real
+          // frame from, so it comes from the geometric normal.
           vec3 dn = gDetail.rgb * 2.0 - 1.0;
-          vec3 N = normalize(normal);
-          // Any vector not parallel to N gives a usable tangent frame; these
-          // models carry no tangent attribute to derive a real one from.
-          vec3 up = abs(N.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-          vec3 T = normalize(cross(up, N));
-          vec3 B = cross(N, T);
-          normal = normalize(N + (T * dn.x + B * dn.y) * uNormalAmp);
+          normal = normalize(normal
+            + (normalize(vDetailT) * dn.x + normalize(vDetailB) * dn.y) * uNormalAmp);
         }`,
       );
   };

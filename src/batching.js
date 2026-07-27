@@ -27,6 +27,29 @@ function signature(geo) {
 }
 
 /**
+ * Widen quantized attributes to plain Float32 in place.
+ *
+ * Anything that writes transformed values back into a geometry has to do this
+ * first: `BufferAttribute.setXYZ` re-normalizes into the backing integer array,
+ * so a world-space coordinate written into a normalized Int16 attribute wraps
+ * instead of clamping. It also makes attribute types uniform, which matters
+ * because `mergeGeometries` requires them to match across the bucket.
+ */
+function dequantize(geo) {
+  for (const [name, attr] of Object.entries(geo.attributes)) {
+    if (attr.array instanceof Float32Array && !attr.normalized) continue;
+    const out = new Float32Array(attr.count * attr.itemSize);
+    for (let i = 0; i < attr.count; i++) {
+      for (let c = 0; c < attr.itemSize; c++) {
+        // getComponent applies the de-normalization; the copy is plain floats.
+        out[i * attr.itemSize + c] = attr.getComponent(i, c);
+      }
+    }
+    geo.setAttribute(name, new THREE.BufferAttribute(out, attr.itemSize));
+  }
+}
+
+/**
  * @param {THREE.Object3D} root      subtree to batch
  * @param {Set<THREE.Object3D>} exclude  nodes to leave alone, with their subtrees
  * @returns {{group: THREE.Group, before: number, after: number, merged: number}}
@@ -64,6 +87,14 @@ export function batchStatic(root, exclude = new Set()) {
     if (meshes.length < 2) continue;         // nothing to gain
     const geos = meshes.map((m) => {
       const g = m.geometry.clone();
+      // The .glb files are meshopt-compressed, which brings KHR_mesh_quantization
+      // with it: POSITION arrives as *normalized* Int16, meaning the attribute
+      // holds [-1,1] and the real metres live on the node's scale. Baking a world
+      // matrix into that would write values like -22.0 back through
+      // setXYZ -> round(value * 32767), which overflows Int16 and wraps — a
+      // vertex at (-22.000, -0.545, 19.993) comes back as (0.001, -0.545, -0.008),
+      // silently destroying the merged geometry. Widen to float first.
+      dequantize(g);
       g.applyMatrix4(m.matrixWorld);         // bake into world space
       // Merging is per-attribute; anything not shared has already been keyed out.
       return g;
@@ -231,6 +262,8 @@ export function batchWithinNodes(nodes) {
       if (ms.length < 2) { built.push(null); continue; }
       const geos = ms.map((m) => {
         const g = m.geometry.clone();
+        // Same quantization trap as batchStatic — see dequantize().
+        dequantize(g);
         _rel.multiplyMatrices(_inv, m.matrixWorld);
         g.applyMatrix4(_rel);
         return g;

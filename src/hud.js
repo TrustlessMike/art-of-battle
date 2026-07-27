@@ -32,7 +32,13 @@ export class HUD {
     this.messages = [];
     this.floats = [];
     this.time = 0;
-    this.hintTimer = 9;
+    // Hints used to start counting down the moment the HUD existed, which
+    // meant they expired during character creation and the 25s preparation
+    // phase — a player reached their first exchange with nothing on screen.
+    // They are now armed when the fighting actually starts, and `H` recalls
+    // them at any point.
+    this.hintTimer = 0;
+    this.hintsPinned = false;
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -76,7 +82,7 @@ export class HUD {
   draw(dt, ctxState) {
     const { player, enemy, camera, duel, paused, showIndicator = true } = ctxState;
     this.time += dt;
-    this.hintTimer -= dt;
+    if (this.hintTimer > 0) this.hintTimer -= dt;
     const c = this.ctx;
     c.clearRect(0, 0, this.w, this.h);
 
@@ -85,7 +91,7 @@ export class HUD {
     this._drawBars(c, player, enemy);
     this._drawFloats(c, dt, camera);
     this._drawMessages(c, dt);
-    if (this.hintTimer > 0) this._drawHints(c);
+    if (this.hintTimer > 0 || this.hintsPinned) this._drawHints(c);
     if (paused) this._drawPaused(c, ctxState.started);
   }
 
@@ -215,13 +221,21 @@ export class HUD {
   _vitals(c, f, x, y, w, align, label) {
     const hf = f.health / f.maxHealth;
     const sf = f.stamina / 100;
+    // Every font here is scaled by `this.s` to fit narrow viewports, so the
+    // bar geometry has to be too. Left in raw pixels it stayed full size while
+    // the labels shrank to 58%, and the block lost its proportions exactly
+    // where space was tightest.
+    const sc = this.s;
+    const hBar = 14 * sc;
+    const sBar = 5 * sc;
+    const gap = 17 * sc;
 
     c.save();
     c.font = `600 ${12 * this.s}px ui-sans-serif, system-ui, sans-serif`;
     c.fillStyle = 'rgba(220,228,240,0.75)';
     c.textAlign = align;
     c.letterSpacing = '2px';
-    c.fillText(label.toUpperCase(), align === 'right' ? x + w : x, y - 9);
+    c.fillText(label.toUpperCase(), align === 'right' ? x + w : x, y - 9 * sc);
     // Their archetype is information you have earned by looking at them; it
     // tells you what kind of fight this is before the first exchange.
     if (f.archetypeName) {
@@ -229,7 +243,7 @@ export class HUD {
       c.fillStyle = 'rgba(215,222,233,0.42)';
       c.letterSpacing = '1px';
       c.fillText(f.archetypeName.toUpperCase(),
-        align === 'right' ? x + w : x, y - 22);
+        align === 'right' ? x + w : x, y - 22 * sc);
     }
     c.letterSpacing = '0px';
     c.restore();
@@ -238,11 +252,11 @@ export class HUD {
     f._ghost = f._ghost === undefined ? hf : f._ghost;
     f._ghost += (hf - f._ghost) * 0.06;
     c.fillStyle = COL.healthLost;
-    c.fillRect(x, y, w * Math.max(0, f._ghost), 14);
+    c.fillRect(x, y, w * Math.max(0, f._ghost), hBar);
 
-    this._bar(c, x, y, w, 14, hf,
+    this._bar(c, x, y, w, hBar, hf,
       f.hitFlash > 0 ? '#ffffff' : COL.health, 'rgba(10,12,16,0.7)');
-    this._bar(c, x, y + 17, w, 5, sf,
+    this._bar(c, x, y + gap, w, sBar, sf,
       f.exhausted > 0 ? COL.staminaLow : COL.stamina, 'rgba(10,12,16,0.7)');
 
     if (f.exhausted > 0) {
@@ -250,7 +264,7 @@ export class HUD {
       c.fillStyle = COL.staminaLow;
       c.textAlign = align;
       c.globalAlpha = 0.6 + Math.sin(this.time * 12) * 0.4;
-      c.fillText('EXHAUSTED', align === 'right' ? x + w : x, y + 36);
+      c.fillText('EXHAUSTED', align === 'right' ? x + w : x, y + 36 * sc);
       c.globalAlpha = 1;
     }
   }
@@ -307,22 +321,76 @@ export class HUD {
     c.restore();
   }
 
+  /** Arm the auto-showing hints (called when a round's action phase opens). */
+  showHints(seconds = 8) {
+    if (!this.hintsPinned) this.hintTimer = seconds;
+  }
+
+  toggleHints() {
+    this.hintsPinned = !this.hintsPinned;
+    this.hintTimer = 0;
+    return this.hintsPinned;
+  }
+
+  /**
+   * The control panel.
+   *
+   * Previously four full-width sentences floating over the scene, whose last
+   * line landed 11 pixels above the preparation prompt and collided with it.
+   * Now a bounded panel with its own backdrop, sitting clear of the utility row
+   * beneath it, and laid out as key/action pairs so it can be scanned rather
+   * than read.
+   */
   _drawHints(c) {
-    const lines = [
-      'MOUSE — look around.  When you LOCK ON to an enemy, mouse sets your GUARD.',
-      'LEFT CLICK light  ·  RIGHT CLICK heavy (hold = unblockable)  ·  time a HEAVY to PARRY',
-      'E guard break  ·  SPACE dodge  ·  F feint  ·  Q free look  ·  1-4 utility  ·  G graphics',
-      'Attack: break the banner.  Defend: hold the chapel until the clock runs out.',
+    const s = this.s;
+    const rows = [
+      ['MOUSE', 'Look — sets your guard when locked on'],
+      ['LEFT / RIGHT CLICK', 'Light / heavy — hold right to charge'],
+      ['RIGHT CLICK on their swing', 'Parry'],
+      ['E · SPACE · F', 'Guard break · dodge · feint'],
+      ['Q · 1-4 · G', 'Free look · utility · graphics'],
+      ['H', 'Show or hide these controls'],
     ];
+    const pad = 16 * s;
+    const rowH = 20 * s;
+    const keyW = 178 * s;
+    const w = 470 * s;
+    const h = pad * 2 + rows.length * rowH + 20 * s;
+    const x = (this.w - w) / 2;
+    // Anchored above the utility row (h-118) and the phase prompt (h-142).
+    const y = this.h - 168 * s - h;
+
     c.save();
-    c.textAlign = 'center';
-    c.globalAlpha = Math.min(1, this.hintTimer / 2);
-    c.font = `500 ${14 * this.s}px ui-sans-serif, system-ui, sans-serif`;
-    c.fillStyle = 'rgba(210,220,235,0.8)';
-    c.shadowColor = 'rgba(0,0,0,0.9)';
-    c.shadowBlur = 6;
-    lines.forEach((l, i) => c.fillText(l, this.w / 2,
-      this.h - (128 + lines.length * 22) * this.s + i * 21 * this.s));
+    c.globalAlpha = this.hintsPinned ? 0.96 : Math.min(1, this.hintTimer / 1.5);
+    c.fillStyle = 'rgba(10,13,19,0.72)';
+    c.strokeStyle = 'rgba(215,222,233,0.14)';
+    c.lineWidth = 1;
+    if (c.roundRect) {
+      c.beginPath();
+      c.roundRect(x, y, w, h, 6 * s);
+      c.fill();
+      c.stroke();
+    } else {
+      c.fillRect(x, y, w, h);
+      c.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    }
+
+    c.textAlign = 'left';
+    c.font = `700 ${9.5 * s}px ui-sans-serif, system-ui, sans-serif`;
+    c.letterSpacing = `${3 * s}px`;
+    c.fillStyle = 'rgba(215,222,233,0.42)';
+    c.fillText('CONTROLS', x + pad, y + pad + 8 * s);
+    c.letterSpacing = '0px';
+
+    rows.forEach((r, i) => {
+      const ry = y + pad + 30 * s + i * rowH;
+      c.font = `700 ${11 * s}px ui-sans-serif, system-ui, sans-serif`;
+      c.fillStyle = 'rgba(230,236,246,0.92)';
+      c.fillText(r[0], x + pad, ry);
+      c.font = `500 ${11 * s}px ui-sans-serif, system-ui, sans-serif`;
+      c.fillStyle = 'rgba(196,206,222,0.66)';
+      c.fillText(r[1], x + pad + keyW, ry);
+    });
     c.restore();
   }
 

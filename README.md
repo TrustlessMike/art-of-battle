@@ -48,6 +48,7 @@ guard control the moment an opponent is close and visible.
 | `1`–`4` | Use utility (see below) |
 | `G` | Graphics quality: high / medium / off |
 | `1` `2` `3` before a match | Difficulty: Squire / Warrior / Warlord |
+| `H` | Show or hide the controls panel |
 | `R` rematch · `P` pause | |
 
 ## Character building
@@ -142,6 +143,7 @@ Query parameters, so a change can be judged against itself on the same build:
 | `?nobatch` | Skip material folding and draw-call batching |
 | `?noao` | Skip the baked ambient occlusion |
 | `?ao=0.3` | Bake AO at a different strength (default 0.55) |
+| `?fireshadow` | Let the nearest brazier cast real shadows (see below) |
 
 ## Design notes
 
@@ -202,6 +204,27 @@ hidden underneath them. What the bake actually needed was a gentler strength
 and a floor under the result, so that a fully occluded vertex reads as deep
 shadow rather than as a hole. AO is still damped by local triangle size, which
 matters for the mortar panels, but that was not the fix.
+
+**The compound is bevelled like the fighters are.** `rigkit` has always put a
+6mm single-segment bevel and a 38 degree auto-smooth on the characters and
+weapons, but `build_compound.py` had its own emitter that did neither — every
+wall, step and beam met the light on a perfectly sharp right angle, which is
+most of why the architecture read as untextured next to the armour. Matching
+the two roughly doubles the compound's triangles, 123k to 222k, and costs
+nothing measurable: the frame is bound by draw calls, not by triangles, so the
+GPU time did not move. That is precisely the budget the batching freed.
+
+**Braziers throw a cone of lit air, not a shadow.** The shaft above each fire is
+additive geometry rather than marched volumetrics: it fades toward the tip and
+fades again as it turns edge-on, so there is no hard silhouette where the
+geometry stops, and it costs one draw call.
+
+Real firelight shadows were built and then switched off. A cube shadow map
+renders the scene six times, and the compound is open enough that little is
+culled: one shadow-casting brazier measured **391 draw calls against 355 for
+everything else in the frame**. The effect is genuine but slight — fire here is
+warm fill, not a key light — so it does not earn a doubled frame. It survives
+behind `?fireshadow` for anyone who wants to judge it themselves.
 
 **Post-processing is one combined grade.** Bloom is thresholded so only fire,
 sparks and blade glints pick it up — this is a dark scene and the mood has to
