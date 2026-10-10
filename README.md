@@ -1,5 +1,13 @@
 # Art of Battle
 
+![Art of Battle — sword and three-way guard emblem](docs/brand/logo.png)
+
+**An open-source first-person melee game for the browser.**
+
+[ISC license](LICENSE) · [Contributing](CONTRIBUTING.md) · [Report a bug](https://github.com/TrustlessMike/art-of-battle/issues)
+
+Playable prototype: duel an AI opponent, build your fighter and fight through a destructible compound. Community contributions are welcome; a packaged desktop release and online multiplayer are not provided.
+
 A browser game that puts *For Honor*'s melee duelling inside a *Rainbow Six
 Siege* round structure: a three-direction guard where every exchange is decided
 by reading the incoming blade — fought room to room through a fortified
@@ -10,10 +18,16 @@ Three.js with no runtime dependency beyond `three`, and all sound is
 synthesised at runtime — there are no audio files.
 
 ```bash
-npm install
+git clone https://github.com/TrustlessMike/art-of-battle.git
+cd art-of-battle
+npm ci
 npm run dev      # http://localhost:5183
 npm run assets   # regenerate every .glb from the Blender scripts
 ```
+
+Use Node.js 22.12 or newer. `npm run build` creates the production web build;
+`npm run preview` serves it locally. The generated models are already committed.
+Blender is needed only if you want to regenerate assets.
 
 ## The match
 
@@ -292,3 +306,18 @@ ASSET_CONTRACT.md      the joint hierarchy the game depends on
 Joint names, offsets and bone lengths are hard-coded on the JS side, so any
 change to the rig has to happen in `ASSET_CONTRACT.md`, the Blender scripts and
 `src/rig.js` together.
+
+## Open-source scope
+
+The project code, procedural asset scripts and generated models are available
+under the [ISC license](LICENSE), matching the existing package license.
+Dependencies keep their own licenses. References to other games describe
+inspiration; this is an independent project with original procedural assets.
+
+## Where to help
+
+- Reproduce combat or collision bugs with clear steps.
+- Improve keyboard accessibility and onboarding.
+- Measure performance on a named browser and machine before proposing changes.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
