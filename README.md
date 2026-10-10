@@ -21,13 +21,12 @@ synthesised at runtime — there are no audio files.
 git clone https://github.com/TrustlessMike/art-of-battle.git
 cd art-of-battle
 npm ci
-npm run dev      # http://localhost:5183
-npm run assets   # regenerate every .glb from the Blender scripts
+npm run dev      # open the local URL printed by Vite
 ```
 
 Use Node.js 22.12 or newer. `npm run build` creates the production web build;
 `npm run preview` serves it locally. The generated models are already committed.
-Blender is needed only if you want to regenerate assets.
+Blender is needed only if you want to regenerate assets with `npm run assets`.
 
 ## The match
 
