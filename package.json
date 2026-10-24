@@ -21,5 +21,8 @@
     "@gltf-transform/cli": "^4.4.2",
     "vite": "^8.1.5"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "sharp": "^0.35.5"
+  }
 }
